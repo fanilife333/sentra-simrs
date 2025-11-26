@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sentra SIMRS: Hospital Management Information System
 
-## Getting Started
+A modern, scalable Hospital Management Information System (SIMRS) built on the Next.js stack, designed for operational efficiency, data integrity, and strict role-based security.
 
-First, run the development server:
+## Project Overview
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+This system manages core hospital operations, focusing on robust security via Role-Based Access Control (RBAC) integrated directly into the routing layer.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Key Features
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **Role-Based Access Control (RBAC):** Strict authorization implemented via **Clerk Middleware (Proxy)** and custom JWT session claims to restrict URL access based on user roles (`ADMIN`, `DOCTOR`, `NURSE`, etc.).
+- **Secure Authentication:** High-availability user and session management leveraging **Clerk** for reliability and scalability.
+- **Data Scoping Readiness:** Architectural design supports data segregation based on Facility ID (`fasyankesId`), ensuring staff can only view and manage data relevant to their assigned unit or branch.
+- **Core Data Modules:** Database schema prepared for essential modules including Staff, Patient Management, and Medical Records.
+- **Modern Architecture:** Built on the **Next.js App Router** for optimal performance, server-side rendering, and **TypeScript** for compile-time type safety.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Technology Stack
 
-## Learn More
+| Category                | Technology               | Purpose                                                                   |
+| :---------------------- | :----------------------- | :------------------------------------------------------------------------ |
+| **Framework**           | **Next.js** (App Router) | High-performance full-stack React framework.                              |
+| **Language**            | **TypeScript**           | Ensures type safety, maintainability, and code predictability.            |
+| **Database ORM**        | **Prisma**               | Type-safe database access and streamlined schema management.              |
+| **Authentication/Auth** | **Clerk**                | Authentication, user management, and custom JWT claim injection for RBAC. |
+| **Database**            | PostgreSQL/MySQL         | Reliable relational data storage (configurable via `DATABASE_URL`).       |
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Authorization Structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The system utilizes custom claims within the Clerk JWT session to assign user roles (e.g., `'ADMIN'`). The authorization logic resides in **`proxy.ts`** and enforces rules defined in the **`lib/routes.ts`** mapping file.
 
-## Deploy on Vercel
+### Example Access Rules:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Role                | Primary Accessible Routes                              |
+| :------------------ | :----------------------------------------------------- |
+| `ADMIN` / `MANAGER` | `/admin`, `/record/*`, `/billing`, `/doctor`, `/staff` |
+| `DOCTOR`            | `/doctor`, `/record/patients`, `/patients/*`           |
+| `REGISTRAR`         | `/staff`, `/patients/new`, `/record/patients`          |
+| `patient`           | `/patient-portal`, `/`                                 |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## Environment Requirements
+
+To run this project, the following environment variables are required. These variables **must** be stored in a `.env.local` file and **must not** be committed to the repository.
+
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `CLERK_SECRET_KEY`
+- `DATABASE_URL`
+
+_(Refer to **`.env.example`** for the required structure)_
+
+## Project Setup and Execution
+
+1.  **Clone the Repository:**
+    ```bash
+    git clone [REPOSITORY URL]
+    cd sentra-simrs
+    ```
+2.  **Install Dependencies:**
+    ```bash
+    npm install
+    ```
+3.  **Database Setup (Prisma):**
+    Ensure your database is running and the `DATABASE_URL` is configured in `.env.local`.
+    ```bash
+    npx prisma migrate dev --name init
+    npx prisma generate
+    ```
+4.  **Run Development Server:**
+    ```bash
+    npm run dev
+    ```
+
+The application will be accessible at `http://localhost:3000`.
