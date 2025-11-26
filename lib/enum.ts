@@ -1,10 +1,6 @@
-// lib/enums.ts
-
 /**
  * =================================================================
  * DEFINISI ENUMS/KONSTANTA
- * File ini berisi konstanta dan daftar pilihan yang digunakan di banyak
- * bagian aplikasi (misalnya: Form Select Options).
  * =================================================================
  */
 
@@ -40,7 +36,6 @@ export const EMERGENCY_RELATION_OPTIONS = [
   { value: 'OTHER', label: 'Lainnya' },
 ];
 
-// Anda juga bisa mendefinisikan Enums murni jika dibutuhkan, misalnya:
 export enum AppointmentStatus {
     SCHEDULED = 'SCHEDULED',
     COMPLETED = 'COMPLETED',
