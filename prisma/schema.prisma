@@ -1,0 +1,566 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===================================
+// UTILITY & ENUMS (FINAL)
+// ===================================
+
+enum Role {
+  ADMIN // Administrator Sistem
+  MANAGER // Manajer atau Kepala Fasyankes
+  DOCTOR // Dokter (Klinis)
+  NURSE // Perawat (Klinis)
+  MIDWIFE // Bidan (Klinis)
+  REGISTRAR // Pendaftar/Administrasi (Operasional)
+  LAB_OFFICER // Petugas Laboratorium (Pendukung Diagnosis)
+  FINANCE_OFFICER // Petugas Keuangan/Billing (Operasional)
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum AppointmentType {
+  ONSITE
+  TELEMEDICINE
+}
+
+enum AppointmentStatus {
+  SCHEDULED // Sudah terjadwal
+  IN_PROGRESS // Sedang dilayani
+  COMPLETED // Selesai
+  CANCELED // Dibatalkan
+  NO_SHOW // Tidak datang
+}
+
+enum MedicalRecordStatus {
+  DRAFT // Belum Final
+  FINAL // Sudah ditandatangani/Final
+  AMENDED // Direvisi
+}
+
+// ✅ ENUM BARU UNTUK PENAGIHAN
+enum BillStatus {
+  ISSUED // Tagihan sudah dibuat
+  PARTIAL // Dibayar sebagian
+  FULL_PAID // Lunas
+  VOID // Dibatalkan
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  CARD
+  INSURANCE
+  OTHER
+}
+
+// ENUMS PASIEN
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+  OTHER
+}
+
+enum EmergencyRelation {
+  SPOUSE
+  PARENT
+  CHILD
+  SIBLING
+  FRIEND
+  OTHER
+}
+
+// ===================================
+// CORE MODELS
+// ===================================
+
+model Fasyankes {
+  id              String          @id @default(uuid())
+  name            String
+  organizationId  String          @unique // ID Organisasi SatuSehat (Wajib FHIR)
+  address         String
+  phone           String?
+
+  staff           Staff[]
+  medicalRecords  MedicalRecord[]
+  services        Service[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("fasyankes")
+}
+
+// ------------------------------------------------------------------
+// STAFF (PENGGUNA SISTEM)
+// ------------------------------------------------------------------
+model Staff {
+  id              String     @id @default(uuid())
+  firstName       String     @map("first_name")
+  lastName        String     @map("last_name")
+  email           String     @unique
+  passwordHash    String     @map("password_hash")
+  role            Role
+  status          UserStatus @default(ACTIVE)
+
+  address         String?
+  phone           String?
+  department      String?
+  licenseNumber   String? @map("license_number")
+
+  fasyankesId     String?
+  fasyankes       Fasyankes? @relation(fields: [fasyankesId], references: [id])
+
+  doctorProfile   Doctor? // Relasi Doctor 1-to-1 (Opsional, hanya untuk Role: DOCTOR)
+
+  // ✅ Relasi ke Audit Log
+  auditLogs       AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([fasyankesId, role])
+  @@map("staff")
+}
+
+// DOCTOR (PROFIL KLINIS DARI STAFF)
+model Doctor {
+  id                String @id @default(uuid())
+  specialization    String
+
+  // Relasi 1-to-1 ke Staff
+  staffId           String @unique
+  staff             Staff  @relation(fields: [staffId], references: [id])
+
+  workingDays       WorkingDay[]
+  appointments      Appointment[]    @relation("DoctorAppointments")
+  medicalRecords    MedicalRecord[]  @relation("AttendingDoctor")
+
+  // ✅ Relasi ke Rating dan Diagnosis
+  ratings           Rating[]
+  diagnoses         Diagnosis[]      @relation("DiagnosisDoctor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([specialization])
+  @@map("doctors")
+}
+
+model WorkingDay {
+  id        String @id @default(uuid())
+  dayOfWeek String // Misal: "Monday", "Tuesday"
+  startTime String // Format waktu (misal: "08:00")
+  closeTime String // Format waktu (misal: "16:00")
+
+  doctorId String
+  doctor   Doctor @relation(fields: [doctorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([doctorId, dayOfWeek]) // Dokter hanya boleh memiliki 1 jadwal per hari
+  @@map("working_days")
+}
+
+// ------------------------------------------------------------------
+// PASIEN & RIWAYAT
+// ------------------------------------------------------------------
+
+model Patient {
+  id                    String              @id @default(uuid())
+  nik                   String              @unique @db.VarChar(16) // NIK Wajib SatuSehat
+  ihsNumber             String?             @unique // ID Pasien SatuSehat (Wajib FHIR)
+
+  firstName             String              @map("first_name")
+  lastName              String              @map("last_name")
+  dateOfBirth           DateTime            @map("date_of_birth")
+  gender                Gender
+
+  // -- DATA TAMBAHAN KLINIS & DEMOGRAFI --
+  maritalStatus         MaritalStatus?      @map("marital_status")
+  bloodType             String?             @map("blood_type")
+  imageURL              String?             @map("image_url") // Foto Pasien
+  // ------------------------------------
+
+  address               String
+  phoneNumber           String              @map("phone_number")
+  email                 String?
+
+  // -- KONTAK DARURAT --
+  emergencyName         String?             @map("emergency_name")
+  emergencyNumber       String?             @map("emergency_number")
+  emergencyRelation     EmergencyRelation?  @map("emergency_relation")
+  // --------------------
+
+  privacyConsent        Boolean             @default(false) @map("privacy_consent") // Persetujuan Data
+
+  insuranceId           String?             @map("insurance_id") // Nomor asuransi pasien
+  insuranceProviderId   String?
+  insuranceProvider     InsuranceProvider?  @relation(fields: [insuranceProviderId], references: [id])
+  
+  // ✅ UPDATE AMAN: Penambahan 3 Kolom Baru (Semua dengan nilai default atau opsional)
+  serviceConsent        Boolean             @default(false) @map("service_consent") // Persetujuan Layanan
+  medicalConsent        Boolean             @default(false) @map("medical_consent") // Persetujuan Tindakan Medis
+  colorCode             String?             @map("color_code") // Kode Warna untuk UI
+
+  // -- RELASI KE RIWAYAT MEDIS --
+  allergies             Allergy[]
+  medicalHistory        MedicalHistory[]
+
+  appointments          Appointment[]     @relation("PatientAppointments")
+  medicalRecords        MedicalRecord[]
+
+  // ✅ Relasi ke Billing dan Rating
+  bills                 Bill[]
+  ratings               Rating[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([nik])
+  @@index([ihsNumber])
+  @@index([phoneNumber])
+  @@map("patients")
+}
+
+// Fix untuk kolom yang sudah ada data
+model Allergy {
+  id          String   @id @default(uuid())
+  patientId   String
+  name        String // Nama alergen (misal: "Penisilin")
+  severity    String? // Tingkat keparahan
+
+  patient Patient @relation(fields: [patientId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  
+  @@index([patientId])
+}
+
+// Fix untuk kolom yang sudah ada data
+model MedicalHistory {
+  id            String   @id @default(uuid())
+  patientId     String
+  condition     String   @db.Text // Kondisi (misal: "Diabetes Tipe 2")
+  diagnosisDate DateTime? @map("diagnosis_date")
+  notes         String?
+
+  patient Patient @relation(fields: [patientId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([patientId])
+}
+
+model Appointment {
+  id            String          @id @default(uuid())
+  dateTime      DateTime
+  type          AppointmentType
+
+  // ✅ Tambahkan Reason
+  reason        String?
+
+  status        AppointmentStatus @default(SCHEDULED)
+
+  patientId     String
+  doctorId      String
+
+  patient Patient @relation("PatientAppointments", fields: [patientId], references: [id])
+  doctor  Doctor  @relation("DoctorAppointments", fields: [doctorId], references: [id])
+
+  medicalRecord MedicalRecord? @relation("AppointmentRecord") // Relasi 1-ke-1 atau 1-ke-0
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId, doctorId])
+  @@index([dateTime])
+  @@map("appointments")
+}
+
+// ------------------------------------------------------------------
+// REKAM MEDIS & DIAGNOSIS
+// ------------------------------------------------------------------
+
+model MedicalRecord {
+  id              String                @id @default(uuid())
+  encounterId     String?               @unique // ID Perjumpaan SatuSehat
+
+  date            DateTime              @default(now())
+  status          MedicalRecordStatus   @default(DRAFT)
+
+  chiefComplaint  String? @map("chief_complaint") 
+  
+  // ✅ TIDAK DIHAPUS / TIDAK DIUBAH TIPE DATA:
+  diagnosis       String  @db.Text 
+  
+  treatmentPlan   String? @map("treatment_plan") 
+  
+  notes           String? @db.Text
+
+  // Relasi Vital Sign dan Diagnosis 1-ke-Banyak
+  vitalSigns      VitalSign[]
+  diagnoses       Diagnosis[]
+
+  // Relasi Appointment (1-ke-1)
+  appointmentId   String?               @unique
+  appointment     Appointment?          @relation("AppointmentRecord", fields: [appointmentId], references: [id])
+
+  // Relasi Keuangan
+  bill            Bill?
+  billItems       BillItem[] 
+
+  // Relasi Kunci
+  patientId       String
+  doctorId        String
+  fasyankesId     String
+
+  patient         Patient               @relation(fields: [patientId], references: [id])
+  doctor          Doctor                @relation("AttendingDoctor", fields: [doctorId], references: [id])
+  fasyankes       Fasyankes             @relation(fields: [fasyankesId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  labTests  LabTest[] @relation("LabTests")
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([fasyankesId])
+  @@map("medical_records")
+}
+
+model VitalSign {
+  id String @id @default(uuid())
+
+  // ✅ Pasien dan Medical Record
+  patientId        String // Tetap dipertahankan untuk referensi data historis, meski tidak menjadi relasi langsung
+  medicalRecordId  String
+
+  // Tanda-Tanda Vital
+  bodyTemperature  Float? @map("body_temperature")
+  systolic         Int?
+  diastolic        Int?
+  heartRate        Int?   @map("heart_rate") 
+  respiratoryRate  Int?   @map("respiratory_rate")
+  oxygenSaturation Int?   @map("oxygen_saturation")
+  weight           Float?
+  height           Float?
+
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([medicalRecordId])
+  @@map("vital_signs")
+}
+
+model Diagnosis {
+  id                      String @id @default(uuid())
+  medicalRecordId         String
+  doctorId                String // Dokter yang membuat diagnosis
+
+  // Data Diagnosis
+  symptoms                String? @db.Text // Keluhan/gejala
+  diagnosisCode           String  @map("diagnosis_code") // ICD-10 Code
+  diagnosisDescription    String  @map("diagnosis_description") // Penjelasan Diagnosis
+  prescribedMedications   String? @map("prescribed_medications") @db.Text
+  followUpPlan            String? @map("follow_up_plan") @db.Text
+
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Cascade)
+  doctor        Doctor        @relation("DiagnosisDoctor", fields: [doctorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([medicalRecordId])
+  @@index([doctorId])
+  @@map("diagnoses")
+}
+
+// ------------------------------------------------------------------
+// KEPEGAWAIAN TAMBAHAN & AUDIT
+// ------------------------------------------------------------------
+
+model AuditLog {
+  id      String  @id @default(uuid())
+  userId  String // Staff ID
+  recordId String // ID dari record yang diubah 
+  action  String // Jenis aksi
+  details String? @db.Text // Detail perubahan
+  model   String // Nama model yang diubah
+
+  user Staff @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([model])
+  @@map("audit_logs")
+}
+
+model Rating {
+  id          String  @id @default(uuid())
+  doctorId    String
+  patientId   String
+  ratingValue Int     @map("rating_value") // Nilai rating
+  comment     String?
+
+  doctor  Doctor  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([doctorId, patientId]) // Hanya 1 rating per Pasien per Dokter
+  @@map("ratings")
+}
+
+// ------------------------------------------------------------------
+// SERVICES & BILLING (DENGAN DETAIL TRANSAKSI)
+// ------------------------------------------------------------------
+
+model InsuranceProvider {
+  id      String  @id @default(uuid())
+  name    String  @unique
+  contact String?
+
+  patients Patient[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("insurance_providers")
+}
+
+model Service {
+  id          String  @id @default(uuid())
+  name        String
+  code        String  @unique // Kode layanan
+  price       Float
+  description String?
+
+  billItems   BillItem[]
+  labTest     LabTest? // Relasi 1-to-1 dengan LabTest (jika layanan adalah tes lab)
+
+  fasyankesId String
+  fasyankes   Fasyankes @relation(fields: [fasyankesId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([fasyankesId])
+  @@map("services")
+}
+
+model LabTest {
+  id              String    @id @default(uuid())
+  serviceId       String    @unique // Layanan yang di-request
+  medicalRecordId String
+  testDate        DateTime
+  result          String?   @db.Text
+  status          String // Misalnya: 'Requested', 'In Progress', 'Finalized'
+  notes           String?
+
+  service         Service   @relation(fields: [serviceId], references: [id])
+  medicalRecord   MedicalRecord @relation("LabTests", fields: [medicalRecordId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([medicalRecordId])
+  @@map("lab_tests")
+}
+
+// ✅ MODEL BILL (Dokumen Tagihan)
+model Bill {
+  id              String @id @default(uuid())
+  patientId       String
+  medicalRecordId String @unique // Tagihan selalu terkait dengan 1 Rekam Medis
+
+  billDate        DateTime @default(now())
+  dueDate         DateTime @map("due_date")
+  receiptNumber   String   @unique // Nomor kwitansi/tagihan
+
+  subtotal        Float
+  discountAmount  Float @map("discount_amount")
+  totalAmount     Float @map("total_amount")
+
+  status BillStatus @default(ISSUED)
+
+  // Relasi
+  patient         Patient         @relation(fields: [patientId], references: [id])
+  medicalRecord   MedicalRecord   @relation(fields: [medicalRecordId], references: [id])
+  billItems       BillItem[]
+  paymentRecords  PaymentRecord[] // Riwayat pembayaran
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+  @@map("bills")
+}
+
+// ✅ MODEL BILL ITEM (Detail Layanan dalam Tagihan)
+model BillItem {
+  id              String  @id @default(uuid())
+  billId          String
+  serviceId       String
+
+  quantity        Int
+  unitCost        Float @map("unit_cost")
+  totalCost       Float @map("total_cost")
+
+  // Relasi
+  bill            Bill    @relation(fields: [billId], references: [id], onDelete: Cascade)
+  service         Service @relation(fields: [serviceId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  medicalRecord   MedicalRecord? @relation(fields: [medicalRecordId], references: [id])
+  medicalRecordId String?
+
+  @@index([billId])
+  @@index([serviceId])
+  @@map("bill_items")
+}
+
+// ✅ MODEL PAYMENT RECORD (Pencatatan Pembayaran)
+model PaymentRecord {
+  id              String      @id @default(uuid())
+  billId          String // Menunjuk ke dokumen Bill yang dibayar
+  amountPaid      Float     @map("amount_paid")
+  paymentDate     DateTime @default(now()) @map("payment_date")
+
+  paymentMethod   PaymentMethod
+  referenceNumber String? @map("reference_number") // Misal: Nomor Transaksi Bank
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([billId])
+  @@map("payment_records")
+}
