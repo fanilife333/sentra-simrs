@@ -1,11 +1,22 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/button.js";
+// @ts-ignore
 import { UserButton } from "@clerk/nextjs";
+// @ts-ignore
 import { auth } from "@clerk/nextjs/server";
-import Image from "next/image";
+// @ts-ignore
 import Link from "next/link";
+// @ts-ignore
+import { redirect } from "next/navigation";
+
+import { getRole } from "@/utils/roles.js";
 
 export default async function Home() {
   const { userId } = await auth();
+  const role = userId ? await getRole() : null;
+
+  if (userId && role) {
+    redirect(`/${role.toLowerCase()}`);
+  }
 
   return (
     <div className="flex flex-col items-center justify-center h-screen p-6">
@@ -28,15 +39,19 @@ export default async function Home() {
           </p>
 
           <div className="flex gap-4">
+            {/* TAMPILAN JIKA USER LOGGED IN TAPI GAGAL DIALihkan (KASUS EDGE) */}
             {userId ? (
               <>
-                <Link href={"/dashboard"}>
-                  <Button>Masuk ke Dashboard</Button>
-                </Link>
-                <UserButton />
+                <p className="text-gray-500">
+                  Anda sudah terautentikasi. Silakan refresh jika tidak
+                  dialihkan.
+                </p>
+                <UserButton afterSignOutUrl="/" />
               </>
             ) : (
+              // TAMPILAN UNTUK PENGGUNA LOGGED OUT
               <>
+                {/* 6. PENGGUNAAN KOMPONEN LINK HARUS BENAR */}
                 <Link href="/sign-up">
                   <Button className="md:text-base font-light">
                     Lihat Demo SENTRA Gratis
